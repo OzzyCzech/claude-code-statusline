@@ -2,18 +2,23 @@
 # Claude Code status line:
 # model effort | context + prompt cache | session limit | weekly limit | scratchpad
 # | project + working dir git:(branch|operation) changes | MR or PR + pipeline + merge blockers
-# It fits the width of the terminal: the least important parts go first, then the line breaks in two.
+# It fits the width of the terminal: the least important part goes first, then the line breaks in two,
+# and only then go the other parts it can do without.
 
 input=$(cat)
 
 # A cold cache that would re-cache fewer tokens than this is cheap, so its state stays hidden.
 CACHE_MIN_TOKENS=20000
-# The countdown appears only this close to the cache going cold.
-CACHE_WARN_SECONDS=900
+# The countdown appears in this last part of the cache lifetime, in percent: the last 15 minutes of a 1-hour cache,
+# the last 75 seconds of a 5-minute one. It turns red in the last third of that.
+CACHE_WARN_PERCENT=25
 # How old the cached pipeline and merge status of an MR or PR may get before glab or gh is asked again.
 REVIEW_TTL_SECONDS=60
 # Columns Claude Code takes beside the status line.
 WIDTH_RESERVE=4
+# How many of the least important parts go before the line breaks in two: 1 the scratchpad,
+# 2 also the weekly limit, 3 also the line counts. 0 breaks the line before anything goes.
+DROP_BEFORE_BREAK=1
 
 E=$'\033'
 RESET="$E[0m" BOLD="$E[1m" DIM="$E[2m" RED="$E[31m" GREEN="$E[32m" YELLOW="$E[33m" BLUE="$E[34m" MAGENTA="$E[35m" CYAN="$E[36m"
@@ -42,7 +47,7 @@ mtime() {
 	stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null || echo 0
 }
 
-IFS=$'\x1f' read -r model effort fast ctx_pct cache_warm cache_expires cache_tokens project cwd scratchpad worktree worktree_path h5_pct h5_reset d7_pct d7_reset pr_number pr_url pr_state pr_kind <<<"$(jq -r '
+IFS=$'\x1f' read -r model effort fast ctx_pct cache_warm cache_expires cache_ttl cache_tokens project cwd scratchpad worktree worktree_path h5_pct h5_reset d7_pct d7_reset pr_number pr_url pr_state pr_kind <<<"$(jq -r '
 	def limit: [
 		(if .used_percentage == null then "" else .used_percentage | floor end),
 		(.resets_at // "" | if type == "number" then floor else . end)
@@ -57,6 +62,7 @@ IFS=$'\x1f' read -r model effort fast ctx_pct cache_warm cache_expires cache_tok
 		($c.used_percentage // (if ($c.context_window_size // 0) > 0 then $tokens * 100 / $c.context_window_size else 0 end) | floor),
 		($p.warm // ""),
 		($p.expires_at // ""),
+		($p.ttl // ""),
 		($p.recache_tokens_if_cold // $tokens),
 		(.workspace.project_dir // .workspace.current_dir // .cwd // ""),
 		(.workspace.current_dir // .cwd // ""),
@@ -93,12 +99,22 @@ segment="Context: $(level_color "$ctx_pct")$ctx_pct%$RESET"
 
 # Prompt cache, only when going cold would be expensive: a countdown shortly before it expires, then cold.
 # The clock decides rather than the warm flag, which can lag right at the moment of expiry.
+# How shortly depends on the lifetime of the cache, an hour when Claude Code does not say.
 if [[ $cache_expires =~ ^[0-9]+$ ]] && ((${cache_tokens%.*} >= CACHE_MIN_TOKENS)); then
 	left=$((cache_expires - now))
+	ttl=3600
+	if [[ $cache_ttl =~ ^([1-9][0-9]*)([smh])$ ]]; then
+		case ${BASH_REMATCH[2]} in
+			s) ttl=${BASH_REMATCH[1]} ;;
+			m) ttl=$((BASH_REMATCH[1] * 60)) ;;
+			h) ttl=$((BASH_REMATCH[1] * 3600)) ;;
+		esac
+	fi
+	warn=$((ttl * CACHE_WARN_PERCENT / 100))
 	if [[ $cache_warm == true ]] && ((left > 0)); then
-		if ((left <= CACHE_WARN_SECONDS)); then
+		if ((left <= warn)); then
 			ccolor=$YELLOW
-			((left < 300)) && ccolor=$RED
+			((left * 3 < warn)) && ccolor=$RED
 			segment+=" ${ccolor}⧗ $(((left + 59) / 60)) min$RESET"
 		fi
 	else
@@ -234,11 +250,14 @@ if [[ -n $name ]]; then
 			base=origin/main
 			git_in rev-parse -q --verify "$base" >/dev/null || base=origin/master
 		fi
-		# Not pushed means not on origin/<branch>, or not on the default branch before the first push.
+		# Not pushed means not on the branch git push updates, which @{push} names even on a fork or another pushRemote,
+		# otherwise not on origin/<branch>, or not on the default branch before the first push.
 		if [[ $upstream == "origin/$branch" && $ab =~ ^\+([0-9]+) ]]; then
 			unpushed=${BASH_REMATCH[1]}
 		else
-			unpushed=$(git_in rev-list --count "origin/$branch..HEAD" || git_in rev-list --count "$base..HEAD")
+			unpushed=$(git_in rev-list --count '@{push}..HEAD' ||
+				git_in rev-list --count "origin/$branch..HEAD" ||
+				git_in rev-list --count "$base..HEAD")
 		fi
 		behind=$(git_in rev-list --count "HEAD..$base")
 		((${unpushed:-0} > 0)) && segment+=" ${CYAN}↑$unpushed"
@@ -353,11 +372,12 @@ render() {
 	REPLY=$line
 }
 
-# One line with as few parts dropped as it takes, otherwise two lines the same way, the second from the project on.
+# One line with as few parts dropped as it takes, up to rank DROP_BEFORE_BREAK, otherwise two lines the same way
+# up to the last rank, the second from the project on.
 width=0
 [[ $COLUMNS =~ ^[0-9]+$ ]] && ((COLUMNS > 20)) && width=$((COLUMNS - WIDTH_RESERVE))
 count=${#parts[@]}
-for drop in 0 1 2 3; do
+for ((drop = 0; drop <= DROP_BEFORE_BREAK && drop <= 3; drop++)); do
 	render 0 "$count" "$drop"
 	line=$REPLY
 	fits "$line" && printf '%s' "$line" && exit 0

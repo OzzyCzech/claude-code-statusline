@@ -72,7 +72,7 @@ updates on Claude Code events, such as a new message.
 |------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Opus 5.5 xhigh fast`              | Model, its effort level, `fast` when fast mode is on                                                                                                             |
 | `Context: 64%`                     | Context window used: green below 50 %, yellow below 80 %, then red                                                                                               |
-| `⧗ 4 min` / `⧗ cold`               | Prompt cache about to expire (last 15 minutes, red in the last 5) or already cold, only when re-caching would cost 20k+ tokens                                   |
+| `⧗ 4 min` / `⧗ cold`               | Prompt cache about to expire (last quarter of its TTL, 15 min of an hour, red in the last 5) or already cold, only when re-caching would cost 20k+ tokens        |
 | `Session: 78%↑ 1:20`               | 5-hour usage limit and the time to its reset; `↑` means usage runs ahead of the time elapsed in the window                                                        |
 | `7d: 34% 3d 4h`                    | The same for the weekly limit                                                                                                                                    |
 | `scratch`                          | Link to the scratchpad of the session, once Claude has put something in it                                                                                       |
@@ -83,7 +83,7 @@ updates on Claude Code events, such as a new message.
 | `git:(feature/login\|REBASE 3/7)`  | Operation in progress with its step: `REBASE`, `AM`, `MERGE`, `CHERRY-PICK`, `REVERT`, `BISECT`                                                                  |
 | `✗`                                | Uncommitted changes                                                                                                                                              |
 | `⚠1`                               | Files with conflicts                                                                                                                                             |
-| `↑2`                               | Commits not pushed to `origin/<branch>`, or not on the default branch before the first push                                                                      |
+| `↑2`                               | Commits not on the branch `git push` updates (a fork too), or not on the default branch before the first push                                                    |
 | `↓3`                               | Commits on the default branch of `origin` the branch does not have yet, which a fast-forward merge needs                                                         |
 | `●1`                               | Stashes                                                                                                                                                          |
 | `+48 -12`                          | Lines added and removed against `HEAD`                                                                                                                           |
@@ -93,9 +93,13 @@ updates on Claude Code events, such as a new message.
 
 ## 📐 Narrow terminals
 
-The script reads the terminal width Claude Code passes in `COLUMNS` and fits the line into it. It drops the least
-important parts first, in this order: `scratch`, the weekly limit and the line counts. A limit at 80 % or more always
-stays. When that is still not enough, it breaks the line in two, with the project and git on the second line.
+The script reads the terminal width Claude Code passes in `COLUMNS` and fits the line into it. First it drops `scratch`.
+When that is not enough, it breaks the line in two, with the project and git on the second line, and only then drops
+the weekly limit and the line counts, in this order, so a wider terminal never hides them while a narrower one shows
+them. A limit at 80 % or more always stays.
+
+`DROP_BEFORE_BREAK` sets how many of these parts go before the line breaks: `0` breaks it right away and keeps them
+all, `3` keeps one line for as long as it can.
 
 ## ⚙️ Configuration
 
@@ -104,9 +108,10 @@ The constants at the top of the script:
 | Constant             | Default | Meaning                                                                  |
 |----------------------|---------|--------------------------------------------------------------------------|
 | `CACHE_MIN_TOKENS`   | `20000` | A cold cache that would re-cache fewer tokens than this stays hidden     |
-| `CACHE_WARN_SECONDS` | `900`   | How long before the cache expires the countdown appears                  |
+| `CACHE_WARN_PERCENT` | `25`    | The last part of the cache lifetime with the countdown, in percent       |
 | `REVIEW_TTL_SECONDS` | `60`    | How often glab or gh is asked about the MR or PR                         |
 | `WIDTH_RESERVE`      | `4`     | Columns Claude Code takes beside the status line                         |
+| `DROP_BEFORE_BREAK`  | `1`     | How many of the least important parts go before the line breaks in two   |
 
 ## 🧩 How it works
 
