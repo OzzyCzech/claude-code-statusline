@@ -13,6 +13,29 @@ with a conflict:
 
 ## 🚀 Installation
 
+### Ask Claude Code
+
+Paste this into Claude Code:
+
+```text
+Install the status line from https://github.com/OzzyCzech/claude-code-statusline:
+
+1. Download https://raw.githubusercontent.com/OzzyCzech/claude-code-statusline/main/statusline.sh
+   to ~/.claude/statusline.sh.
+2. In ~/.claude/settings.json set "statusLine" to
+   {"type": "command", "command": "bash ~/.claude/statusline.sh", "refreshInterval": 30}.
+   Keep all my other settings. If a different statusLine is already there, show it to me and ask before replacing it.
+3. Check that jq and git are installed and tell me how to install whatever is missing.
+   If I use GitLab or GitHub, tell me that a logged-in glab or gh adds the MR/PR pipeline status.
+4. Run the script once with a sample session JSON on stdin, e.g.
+   {"model":{"display_name":"Opus"},"context_window":{"used_percentage":42},"cwd":"<current directory>"},
+   and show me what it prints.
+```
+
+The same prompt updates an existing installation to the latest version.
+
+### Manually
+
 Download the script:
 
 ```shell
@@ -34,7 +57,7 @@ Add it to `~/.claude/settings.json`:
 `refreshInterval` keeps the countdowns and the pipeline status moving while Claude is idle. Without it the line only
 updates on Claude Code events, such as a new message.
 
-**Requirements:**
+### Requirements
 
 - Bash 3.2+ (the one macOS ships works) on macOS or Linux
 - [jq](https://jqlang.org) and git (2.35+ for the stash count)
