@@ -19,6 +19,8 @@ WIDTH_RESERVE=4
 # How many of the least important parts go before the line breaks in two: 1 the scratchpad,
 # 2 also the weekly limit, 3 also the line counts. 0 breaks the line before anything goes.
 DROP_BEFORE_BREAK=1
+# Hosts of a self-hosted GitLab without gitlab in the name, separated by spaces, for the links to branches and commits.
+GITLAB_HOSTS=""
 
 E=$'\033'
 RESET="$E[0m" BOLD="$E[1m" DIM="$E[2m" RED="$E[31m" GREEN="$E[32m" YELLOW="$E[33m" BLUE="$E[34m" MAGENTA="$E[35m" CYAN="$E[36m"
@@ -29,8 +31,9 @@ level_color() {
 	if (($1 < 50)); then printf '%s' "$GREEN"; elif (($1 < 80)); then printf '%s' "$YELLOW"; else printf '%s' "$RED"; fi
 }
 
+# A text that opens the address when clicked (OSC 8), the plain text when there is no address.
 link() {
-	printf '%s]8;;%s%s\\%s%s]8;;%s\\' "$E" "$1" "$E" "$2" "$E" "$E"
+	if [[ -n $1 ]]; then printf '%s]8;;%s%s\\%s%s]8;;%s\\' "$E" "$1" "$E" "$2" "$E" "$E"; else printf '%s' "$2"; fi
 }
 
 duration() {
@@ -162,6 +165,63 @@ short_path() {
 	if [[ -z $parent || $parent == "$1" ]]; then printf '%s' "${1:-/}"; else printf '%s/%s' "${parent##*/}" "${1##*/}"; fi
 }
 
+# The web address of a git remote into REPLY: https://host/path from an HTTPS, SSH or scp-like URL, without credentials,
+# the SSH port and .git. Empty for a local path, and for an SSH host without a dot, most likely an alias
+# from ~/.ssh/config, which does not say what host it stands for.
+web_url() {
+	REPLY=""
+	if [[ $1 =~ ^(https?)://([^@/]+@)?([^/]+)/(.+)$ ]]; then
+		REPLY="${BASH_REMATCH[1]}://${BASH_REMATCH[3]}/${BASH_REMATCH[4]}"
+	elif [[ $1 =~ ^ssh://([^@/]+@)?([^/:]+\.[^/:]+)(:[0-9]+)?/(.+)$ ]]; then
+		REPLY="https://${BASH_REMATCH[2]}/${BASH_REMATCH[4]}"
+	elif [[ $1 =~ ^([^@/:]+@)?([^/:]+\.[^/:]+):([^/].*)$ ]]; then
+		REPLY="https://${BASH_REMATCH[2]}/${BASH_REMATCH[3]}"
+	fi
+	REPLY=${REPLY%/}
+	REPLY=${REPLY%.git}
+}
+
+# The web address of the remote of that name into REPLY, empty when it has none.
+remote_web() {
+	local i
+	REPLY=""
+	for ((i = 0; i < ${#remote_names[@]}; i++)); do
+		[[ ${remote_names[i]} == "$1" ]] && REPLY=${remote_webs[i]} && return
+	done
+}
+
+# What the pages of a repository at the web address start with into REPLY: the address on GitHub, the address
+# and /- on GitLab. Empty on any other forge, whose pages of branches and commits look different.
+forge_routes() {
+	local host=${1#*://}
+	host=${host%%/*}
+	host=${host%%:*}
+	REPLY=""
+	if [[ -z $host ]]; then
+		return
+	elif [[ $host == *github* ]]; then
+		REPLY=$1
+	elif [[ $host == *gitlab* || " $GITLAB_HOSTS " == *" $host "* ]]; then
+		REPLY=$1/-
+	fi
+}
+
+# A branch name for an address into REPLY, with % and #, which git allows in it, percent-encoded.
+url_path() {
+	REPLY=${1//[%]/%25}
+	REPLY=${REPLY//[#]/%23}
+}
+
+# The page of a remote-tracking branch such as refs/remotes/fork/feature into REPLY, on the web of its remote.
+branch_page() {
+	local ref=${1#refs/remotes/} routes
+	remote_web "${ref%%/*}"
+	forge_routes "$REPLY"
+	routes=$REPLY
+	url_path "${ref#*/}"
+	REPLY=${routes:+$routes/tree/$REPLY}
+}
+
 # Project: the last two path components, clickable, bold cyan like the directory in the shell prompt.
 # When Claude has moved elsewhere, the working directory follows, since the git status after it is its own:
 # a subdirectory as a path relative to the project (or to the worktree of the session), a directory outside after an arrow.
@@ -190,6 +250,8 @@ fi
 # ✗ anything uncommitted, ⚠ files with conflicts, ↑ commits not pushed yet,
 # ↓ commits behind the default branch of origin (a fast-forward merge needs a rebase), ● stashes,
 # then lines added and removed against HEAD.
+# Clickable on GitHub and GitLab: git opens the repository (on any forge), the branch its page once it is pushed,
+# the hash the commit, ↓ the commits the branch does not have yet.
 name=""
 if [[ -n $cwd ]] && gitdir=$(git_in rev-parse --absolute-git-dir); then
 	op="" step="" head=""
@@ -237,13 +299,22 @@ if [[ -n $cwd ]] && gitdir=$(git_in rev-parse --absolute-git-dir); then
 	[[ -z $name ]] && name=${oid:0:8}
 	((${#name} > 32)) && name="${name:0:31}…"
 	[[ -n $worktree && -n $name && -z $outside ]] && name=$worktree
-fi
-if [[ -n $name ]]; then
-	segment="${BOLD}${BLUE}git:(${RED}$name"
-	[[ -n $op ]] && segment+="${BLUE}|${YELLOW}$op${step:+ $step}"
-	segment+="${BLUE})"
-	[[ -n $changes ]] && segment+=" ${YELLOW}✗"
-	((conflicts > 0)) && segment+=" ${RED}⚠$conflicts"
+
+	# Web addresses of the remotes for the links (Bash 3.2 has no associative arrays). The repository is the one
+	# on origin, or on the first remote with a web address.
+	remote_names=() remote_webs=() repo_url=""
+	while read -r key url; do
+		key=${key#remote.}
+		web_url "$url"
+		remote_names+=("${key%.url}") remote_webs+=("$REPLY")
+		[[ -z $repo_url ]] && repo_url=$REPLY
+	done < <(git_in config --get-regexp '^remote\..*\.url$')
+	remote_web origin
+	[[ -n $REPLY ]] && repo_url=$REPLY
+	forge_routes "$repo_url"
+	routes=$REPLY
+
+	name_url="" unpushed="" behind="" behind_url=""
 	if [[ -n $branch ]]; then
 		base=$(git_in symbolic-ref -q --short refs/remotes/origin/HEAD)
 		if [[ -z $base ]]; then
@@ -252,17 +323,44 @@ if [[ -n $name ]]; then
 		fi
 		# Not pushed means not on the branch git push updates, which @{push} names even on a fork or another pushRemote,
 		# otherwise not on origin/<branch>, or not on the default branch before the first push.
+		# pushed is that branch, the one the link opens.
 		if [[ $upstream == "origin/$branch" && $ab =~ ^\+([0-9]+) ]]; then
-			unpushed=${BASH_REMATCH[1]}
+			unpushed=${BASH_REMATCH[1]} pushed=refs/remotes/origin/$branch
+		elif pushed=$(git_in rev-parse --symbolic-full-name '@{push}') && [[ $pushed == refs/remotes/?*/?* ]]; then
+			unpushed=$(git_in rev-list --count "$pushed..HEAD")
+		elif unpushed=$(git_in rev-list --count "origin/$branch..HEAD"); then
+			pushed=refs/remotes/origin/$branch
 		else
-			unpushed=$(git_in rev-list --count '@{push}..HEAD' ||
-				git_in rev-list --count "origin/$branch..HEAD" ||
-				git_in rev-list --count "$base..HEAD")
+			pushed="" unpushed=$(git_in rev-list --count "$base..HEAD")
+		fi
+		if [[ -n $pushed ]]; then
+			branch_page "$pushed"
+			name_url=$REPLY
 		fi
 		behind=$(git_in rev-list --count "HEAD..$base")
-		((${unpushed:-0} > 0)) && segment+=" ${CYAN}↑$unpushed"
-		((${behind:-0} > 0)) && segment+=" ${CYAN}↓$behind"
+		# The commits the branch does not have yet: the default branch compared with where the branch left it.
+		if ((${behind:-0} > 0)) && [[ -n $routes ]] && fork_point=$(git_in merge-base HEAD "$base"); then
+			url_path "${base#origin/}"
+			behind_url="$routes/compare/$fork_point...$REPLY"
+		fi
+	elif [[ -n $head ]]; then
+		# The branch being rebased, when it is on origin.
+		if git_in rev-parse -q --verify "refs/remotes/origin/${head#refs/heads/}" >/dev/null; then
+			branch_page "refs/remotes/origin/${head#refs/heads/}"
+			name_url=$REPLY
+		fi
+	elif [[ -n $oid && -n $routes ]]; then
+		name_url="$routes/commit/$oid"
 	fi
+fi
+if [[ -n $name ]]; then
+	segment="${BOLD}${BLUE}$(link "$repo_url" git):(${RED}$(link "$name_url" "$name")"
+	[[ -n $op ]] && segment+="${BLUE}|${YELLOW}$op${step:+ $step}"
+	segment+="${BLUE})"
+	[[ -n $changes ]] && segment+=" ${YELLOW}✗"
+	((conflicts > 0)) && segment+=" ${RED}⚠$conflicts"
+	((${unpushed:-0} > 0)) && segment+=" ${CYAN}↑$unpushed"
+	((${behind:-0} > 0)) && segment+=" ${CYAN}$(link "$behind_url" "↓$behind")"
 	((stashes > 0)) && segment+=" ${MAGENTA}●$stashes"
 	add "$segment$RESET" " "
 
@@ -273,14 +371,16 @@ if [[ -n $name ]]; then
 fi
 
 # Pipeline and merge status of the MR or PR at the URL in GitLab terms, separated by \x1f: the pipeline status,
-# need_rebase when the branch must catch up with the target first, whether it has conflicts and whether its blocking
-# threads are resolved (GitLab only). glab or gh runs in the background at most once a minute, the line shows the cached result.
+# need_rebase when the branch must catch up with the target first, whether it has conflicts, whether its blocking
+# threads are resolved and the address of the pipeline (both GitLab only). glab or gh runs in the background at most
+# once a minute, the line shows the cached result.
 review_status() {
 	local url=$1 dir="${TMPDIR:-/tmp}/claude-statusline" file fetch filter
 	if [[ $url =~ ^https?://([^/]+)/(.+)/-/merge_requests/([0-9]+) ]]; then
 		fetch=(glab api --hostname "${BASH_REMATCH[1]}" "projects/${BASH_REMATCH[2]//\//%2F}/merge_requests/${BASH_REMATCH[3]}")
 		filter='select(.iid)
-			| [.head_pipeline.status // "", .detailed_merge_status // "", .has_conflicts, .blocking_discussions_resolved]'
+			| [.head_pipeline.status // "", .detailed_merge_status // "", .has_conflicts, .blocking_discussions_resolved,
+				.head_pipeline.web_url // ""]'
 	elif [[ $url =~ ^https?://[^/]+/[^/]+/[^/]+/pull/[0-9]+ ]]; then
 		fetch=(gh pr view "$url" --json number,statusCheckRollup,mergeStateStatus,mergeable)
 		filter='select(.number)
@@ -320,6 +420,7 @@ review_status() {
 
 # Open MR or PR of the branch, clickable, coloured by its review state, with the pipeline status
 # and what still blocks the merge: conflicts, a rebase, unresolved blocking threads.
+# The pipeline status opens the pipeline (the checks on GitHub), conflict the page that resolves them.
 if [[ -n $pr_number ]]; then
 	case $pr_state in
 		approved) pcolor=$GREEN ;;
@@ -332,15 +433,21 @@ if [[ -n $pr_number ]]; then
 	[[ -n $pr_url ]] && label=$(link "$pr_url" "$label")
 	segment="$pcolor$label$RESET"
 	if [[ -n $pr_url ]]; then
-		IFS=$'\x1f' read -r pipeline merge_status conflicting resolved <<<"$(review_status "$pr_url")"
+		IFS=$'\x1f' read -r pipeline merge_status conflicting resolved pipeline_url <<<"$(review_status "$pr_url")"
+		if [[ -z $pipeline_url ]]; then
+			pipeline_url=$pr_url/checks
+			[[ $pr_url == */-/merge_requests/* ]] && pipeline_url=$pr_url/pipelines
+		fi
 		case $pipeline in
-			success) segment+=" ${GREEN}✓$RESET" ;;
-			failed) segment+=" ${RED}✗$RESET" ;;
-			running | pending | created | preparing | waiting_for_resource | scheduled) segment+=" ${YELLOW}●$RESET" ;;
-			canceled | skipped) segment+=" ${DIM}⊘$RESET" ;;
-			manual) segment+=" ${DIM}▶$RESET" ;;
+			success) icon=✓ icolor=$GREEN ;;
+			failed) icon=✗ icolor=$RED ;;
+			running | pending | created | preparing | waiting_for_resource | scheduled) icon=● icolor=$YELLOW ;;
+			canceled | skipped) icon=⊘ icolor=$DIM ;;
+			manual) icon=▶ icolor=$DIM ;;
+			*) icon="" ;;
 		esac
-		[[ $conflicting == true ]] && segment+=" ${RED}conflict$RESET"
+		[[ -n $icon ]] && segment+=" $icolor$(link "$pipeline_url" "$icon")$RESET"
+		[[ $conflicting == true ]] && segment+=" ${RED}$(link "$pr_url/conflicts" conflict)$RESET"
 		[[ $merge_status == need_rebase ]] && segment+=" ${YELLOW}rebase$RESET"
 		[[ $resolved == false ]] && segment+=" ${YELLOW}threads$RESET"
 	fi

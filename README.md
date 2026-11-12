@@ -63,8 +63,8 @@ updates on Claude Code events, such as a new message.
 - [jq](https://jqlang.org) and git (2.35+ for the stash count)
 - Optional: [glab](https://gitlab.com/gitlab-org/cli) for GitLab MRs, [gh](https://cli.github.com) for GitHub PRs,
   both logged in
-- Optional: a terminal with OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, Ghostty) to make the project, the scratchpad
-  and the MR or PR clickable
+- Optional: a terminal with OSC 8 hyperlinks (iTerm2, Kitty, WezTerm, Ghostty) to make the [links](#-links)
+  clickable
 
 ## 🔍 What it shows
 
@@ -91,6 +91,28 @@ updates on Claude Code events, such as a new message.
 | `✓` `✗` `●` `⊘` `▶`                | Pipeline or checks: passed, failed, running, canceled or skipped, waiting for a manual job                                                                       |
 | `conflict` `rebase` `threads`      | What still blocks the merge: conflicts, the branch must catch up with the target, unresolved blocking threads (GitLab only)                                     |
 
+## 🔗 Links
+
+In a terminal with OSC 8 hyperlinks, these parts open with Cmd+click on macOS, Ctrl+click on Windows and Linux:
+
+| Part                                  | Opens                                                                                         |
+|---------------------------------------|-----------------------------------------------------------------------------------------------|
+| `acme/webapp`, `/src`, `→ other/repo` | The directory in Finder or your file manager                                                  |
+| `scratch`                             | The scratchpad of the session                                                                 |
+| `git`                                 | The repository on the web, from the `origin` remote                                           |
+| `feature/login`                       | The page of the branch on the remote `git push` updates, a fork too, once the branch is there |
+| `b332a660`                            | The commit, on a detached HEAD                                                                |
+| `↓3`                                  | The commits on the default branch the branch does not have yet                                |
+| `!128` / `#42`                        | The MR or PR                                                                                  |
+| `✓` `✗` `●` `⊘` `▶`                   | The pipeline on GitLab, the checks on GitHub                                                  |
+| `conflict`                            | The page that resolves the conflicts                                                          |
+
+The addresses come from the URLs of the git remotes, HTTPS or SSH, so they cost no network request. The repository
+opens on any forge. The branch, the commit and `↓` need GitHub or GitLab, recognised by `github` or `gitlab` in the
+host name; add a self-hosted GitLab with another name to `GITLAB_HOSTS`. The repository is the one on `origin`, or on
+the first remote with a web address when `origin` has none. A host alias from `~/.ssh/config` does not say which host
+it stands for: without a dot (`github-work`) it gives no link, with one (`github.com-work`) a link that leads nowhere.
+
 ## 📐 Narrow terminals
 
 The script reads the terminal width Claude Code passes in `COLUMNS` and fits the line into it. First it drops `scratch`.
@@ -112,6 +134,7 @@ The constants at the top of the script:
 | `REVIEW_TTL_SECONDS` | `60`    | How often glab or gh is asked about the MR or PR                         |
 | `WIDTH_RESERVE`      | `4`     | Columns Claude Code takes beside the status line                         |
 | `DROP_BEFORE_BREAK`  | `1`     | How many of the least important parts go before the line breaks in two   |
+| `GITLAB_HOSTS`       | `""`    | Self-hosted GitLab hosts without gitlab in the name, space-separated     |
 
 ## 🧩 How it works
 
