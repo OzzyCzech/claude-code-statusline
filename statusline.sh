@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code status line:
-# model effort | context + prompt cache | session limit | weekly limit | scratchpad
+# model effort | context + prompt cache | session limit / weekly limit | scratchpad
 # | project + working dir git:(branch|operation) changes | MR or PR + pipeline + merge blockers
 # It fits the width of the terminal: the least important part goes first, then the line breaks in two,
 # and only then go the other parts it can do without.
@@ -36,13 +36,20 @@ link() {
 	if [[ -n $1 ]]; then printf '%s]8;;%s%s\\%s%s]8;;%s\\' "$E" "$1" "$E" "$2" "$E" "$E"; else printf '%s' "$2"; fi
 }
 
+# Time left as 2d 5h, 3h 28m or 28m, without a zero hour or minute: 2d, 3h. In days whenever the second argument
+# is set, 0d 5h on the last day.
 duration() {
-	local s=$1
-	if ((s >= 86400)); then
-		printf '%dd %dh' $((s / 86400)) $((s % 86400 / 3600))
+	local d=$(($1 / 86400)) h=$(($1 % 86400 / 3600)) m=$(($1 % 3600 / 60))
+	if ((d > 0)) || [[ -n $2 ]]; then
+		printf '%dd' "$d"
+		((h > 0 || d == 0)) && printf ' %dh' "$h"
+	elif ((h > 0)); then
+		printf '%dh' "$h"
+		((m > 0)) && printf ' %dm' "$m"
 	else
-		printf '%d:%02d' $((s / 3600)) $((s % 3600 / 60))
+		printf '%dm' "$m"
 	fi
+	return 0
 }
 
 # Modification time of a file in epoch seconds, with GNU or BSD stat.
@@ -126,10 +133,12 @@ if [[ $cache_expires =~ ^[0-9]+$ ]] && ((${cache_tokens%.*} >= CACHE_MIN_TOKENS)
 fi
 add "$segment"
 
-# Usage limits with the time left until the reset; the arrow means usage runs ahead of time.
-# A limit at 80 % or more stays however narrow the terminal is.
+# Usage limits, the session one and the weekly one after a slash, each with the time left until the reset:
+# Usage: 12% 3h 28m / 45% 2d. The weekly time is always in days, so it is not taken for the session one even alone.
+# The arrow means usage runs ahead of time. A limit at 80 % or more stays however narrow the terminal is.
+usage_shown=""
 limit() {
-	local label=$1 pct=$2 reset=$3 window=$4 rank=${5:-0} left="" ahead=""
+	local pct=$1 reset=$2 window=$3 rank=${4:-0} days=$5 left="" ahead="" text
 	[[ -n $pct ]] || return 0
 	if [[ $reset =~ ^[0-9]+$ ]]; then
 		left=$((reset - now))
@@ -137,10 +146,16 @@ limit() {
 		((pct > (window - left) * 100 / window)) && ahead="↑"
 	fi
 	((pct >= 80)) && rank=0
-	add "$label: $(level_color "$pct")$pct%$ahead$RESET${left:+ $(duration "$left")}" "$SEP" "$rank"
+	text="$(level_color "$pct")$pct%$ahead$RESET${left:+ $(duration "$left" "$days")}"
+	if [[ -n $usage_shown ]]; then
+		add "$text" " $DIM/$RESET " "$rank"
+	else
+		add "Usage: $text" "$SEP" "$rank"
+	fi
+	usage_shown=1
 }
-limit Session "$h5_pct" "$h5_reset" 18000
-limit 7d "$d7_pct" "$d7_reset" 604800 2
+limit "$h5_pct" "$h5_reset" 18000
+limit "$d7_pct" "$d7_reset" 604800 2 days
 
 # Claude's scratchpad of this session: only when something is in it, clickable.
 if [[ -n $scratchpad && -d $scratchpad && -n $(ls -A "$scratchpad" 2>/dev/null) ]]; then
