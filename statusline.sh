@@ -125,7 +125,7 @@ if [[ $cache_expires =~ ^[0-9]+$ ]] && ((${cache_tokens%.*} >= CACHE_MIN_TOKENS)
 		if ((left <= warn)); then
 			ccolor=$YELLOW
 			((left * 3 < warn)) && ccolor=$RED
-			segment+=" ${ccolor}⧗ $(((left + 59) / 60)) min$RESET"
+			segment+=" ${ccolor}⧗ $(((left + 59) / 60))m$RESET"
 		fi
 	else
 		segment+=" ${BLUE}⧗ cold$RESET"

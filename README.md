@@ -72,7 +72,7 @@ updates on Claude Code events, such as a new message.
 |------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Opus 5.5 xhigh fast`              | Model, its effort level, `fast` when fast mode is on                                                                                                             |
 | `Context: 64%`                     | Context window used: green below 50 %, yellow below 80 %, then red                                                                                               |
-| `⧗ 4 min` / `⧗ cold`               | Prompt cache about to expire (last quarter of its TTL, 15 min of an hour, red in the last 5) or already cold, only when re-caching would cost 20k+ tokens        |
+| `⧗ 4m` / `⧗ cold`                  | Prompt cache about to expire (last quarter of its TTL, 15 min of an hour, red in the last 5) or already cold, only when re-caching would cost 20k+ tokens        |
 | `Usage: 78%↑ 1h 20m`               | Usage limits; first the 5-hour one and the time to its reset, `↑` means usage runs ahead of the time elapsed in the window                                       |
 | `34% 3d 4h`                        | Then the weekly one, its time always in days (`0d 5h` on the last day), so it cannot pass for the 5-hour one                                                     |
 | `scratch`                          | Link to the scratchpad of the session, once Claude has put something in it                                                                                       |
