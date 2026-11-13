@@ -1,6 +1,6 @@
 #!/bin/bash
 # Claude Code status line:
-# model effort | context + prompt cache | session limit / weekly limit | scratchpad
+# model effort | context + prompt cache | session and weekly limit | scratchpad
 # | project + working dir git:(branch|operation) changes | MR or PR + pipeline + merge blockers
 # It fits the width of the terminal: the least important part goes first, then the line breaks in two,
 # and only then go the other parts it can do without.
@@ -133,8 +133,8 @@ if [[ $cache_expires =~ ^[0-9]+$ ]] && ((${cache_tokens%.*} >= CACHE_MIN_TOKENS)
 fi
 add "$segment"
 
-# Usage limits, the session one and the weekly one after a slash, each with the time left until the reset:
-# Usage: 12% 3h 28m / 45% 2d. The weekly time is always in days, so it is not taken for the session one even alone.
+# Usage limits, the session one and then the weekly one, each with the time left until the reset:
+# Usage: 12% 3h 28m 45% 2d. The weekly time is always in days, so it is not taken for the session one even alone.
 # The arrow means usage runs ahead of time. A limit at 80 % or more stays however narrow the terminal is.
 usage_shown=""
 limit() {
@@ -148,7 +148,7 @@ limit() {
 	((pct >= 80)) && rank=0
 	text="$(level_color "$pct")$pct%$ahead$RESET${left:+ $(duration "$left" "$days")}"
 	if [[ -n $usage_shown ]]; then
-		add "$text" " $DIM/$RESET " "$rank"
+		add "$text" " " "$rank"
 	else
 		add "Usage: $text" "$SEP" "$rank"
 	fi
